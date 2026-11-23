@@ -1,7 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { Anime, Episode, PagedResult, AdPlacement } from './models';
+import { Anime, Episode, PagedResult, AdPlacement, VideoSource } from './models';
 @Injectable({providedIn:'root'})
 export class CatalogService {
   private http = inject(HttpClient);
@@ -15,6 +15,9 @@ export class CatalogService {
   }
   anime(slug:string): Observable<Anime> { return this.http.get<Anime>(`${this.baseUrl}/api/anime/${encodeURIComponent(slug)}`); }
   episodes(slug:string): Observable<Episode[]> { return this.http.get<Episode[]>(`${this.baseUrl}/api/anime/${encodeURIComponent(slug)}/episodes`); }
+  sources(slug:string,number:number): Observable<VideoSource[]> {
+    return this.http.get<VideoSource[]>(`${this.baseUrl}/api/anime/${encodeURIComponent(slug)}/episodes/${number}/sources`);
+  }
   placements(): Observable<AdPlacement[]> { return this.http.get<AdPlacement[]>(`${this.baseUrl}/api/ads`); }
   toggleFavorite(id:number):void {
     this.favorites.update(ids => ids.includes(id) ? ids.filter(x=>x!==id) : [...ids,id]);

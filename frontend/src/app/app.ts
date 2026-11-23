@@ -3,7 +3,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink, RouterOutlet, Routes } from '@angular/router';
 import { CatalogService } from './catalog.service';
-import { Anime, Episode, PagedResult } from './models';
+import { Anime, Episode, PagedResult, VideoSource } from './models';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 @Component({selector:'app-root',standalone:true,imports:[RouterOutlet,RouterLink],template:`
 <header class="topbar"><nav class="shell nav"><a class="logo" routerLink="/">NÉBULA<span>✦</span></a><div class="nav-links"><a routerLink="/">Inicio</a><a routerLink="/catalogo">Catálogo</a><a routerLink="/favoritos">♡ Favoritos</a><a routerLink="/admin">Administración</a></div></nav></header>
 <main><router-outlet/></main>
@@ -39,14 +40,47 @@ export class DetailComponent implements OnInit {
   favorite(id:number){this.api.toggleFavorite(id);}
 }
 @Component({selector:'app-watch',standalone:true,imports:[CommonModule,RouterLink],template:`
-<section class="shell content"><a [routerLink]="['/anime',slug]">← Volver a la serie</a><h1>Episodio {{number}}</h1>
-@if(episode()?.videoUrl;as url){<video class="video" controls playsinline controlsList="nodownload" [src]="url">Tu navegador no admite video HTML5.</video>} @else {<div class="player-placeholder"><h2>Video no disponible</h2><p>Únicamente se habilitarán videos sobre los que tengamos autorización de distribución.</p></div>}
-<div class="ad-slot">ESPACIO PUBLICITARIO · Desactivado</div></section>
-`})
+<section class="shell content">
+<a [routerLink]="['/anime',slug]">← Volver a la serie</a><h1>Episodio {{number}}</h1>
+@if(sources().length){<div class="source-picker" aria-label="Servidores disponibles">
+  @for(source of sources();track source.id){
+    <button type="button" class="source-choice" [attr.aria-pressed]="selected()?.id===source.id"
+      (click)="selectSource(source)">{{source.provider}} · {{source.quality}}</button>
+  }
+</div>}
+@if(selected()?.kind==='embed' && safeEmbed()){
+  <iframe class="video" [src]="safeEmbed()" title="Reproductor externo autorizado" allow="fullscreen; picture-in-picture"
+   allowfullscreen referrerpolicy="strict-origin-when-cross-origin" loading="lazy"
+   sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
+} @else if(selected()?.kind==='direct' && selected()?.url;as url) {
+  <video class="video" controls playsinline [src]="url">Tu navegador no admite video HTML5.</video>
+} @else {
+  <div class="player-placeholder"><h2>Video no disponible</h2>
+    <p>No hay fuentes autorizadas disponibles para este episodio.</p></div>
+}
+<p class="notice">Los servidores externos pueden tener sus propias condiciones y restricciones.</p>
+<div class="ad-slot">ESPACIO PUBLICITARIO · Desactivado</div>
+</section>`})
 export class WatchComponent implements OnInit {
   private route=inject(ActivatedRoute);private api=inject(CatalogService);
-  slug='';number=1;episode=signal<Episode|null>(null);
-  ngOnInit(){this.slug=this.route.snapshot.paramMap.get('slug')||'';this.number=Number(this.route.snapshot.paramMap.get('number')||1);this.api.episodes(this.slug).subscribe({next:eps=>this.episode.set(eps.find(e=>e.number===this.number)||null)});}
+  private sanitizer=inject(DomSanitizer);
+  slug='';number=1;sources=signal<VideoSource[]>([]);selected=signal<VideoSource|null>(null);
+  safeEmbed=signal<SafeResourceUrl|null>(null);
+  ngOnInit(){
+    this.slug=this.route.snapshot.paramMap.get('slug')||'';
+    this.number=Number(this.route.snapshot.paramMap.get('number')||1);
+    this.api.sources(this.slug,this.number).subscribe({
+      next:items=>{this.sources.set(items);if(items.length)this.selectSource(items[0]);},
+      error:()=>this.sources.set([])
+    });
+  }
+  selectSource(source:VideoSource){
+    this.selected.set(source);this.safeEmbed.set(null);
+    if(source.kind==='embed'){
+      // The backend only exposes sources from configured, explicitly trusted hosts.
+      this.safeEmbed.set(this.sanitizer.bypassSecurityTrustResourceUrl(source.url));
+    }
+  }
 }
 @Component({selector:'app-favorites',standalone:true,imports:[RouterLink],template:`
 <section class="shell content"><h1>Mis favoritos</h1><p>La lista se guarda en este navegador.</p><div class="cards">@for(a of anime();track a.id){<a class="anime-card" [routerLink]="['/anime',a.slug]"><div class="poster">♥</div><div class="card-info">{{a.title}}</div></a>} @empty {<p>No tienes favoritos. <a routerLink="/catalogo">Explorar catálogo</a></p>}</div></section>

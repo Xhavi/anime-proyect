@@ -1,0 +1,40 @@
+name: Build Angular and ASP.NET Core
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - '.github/workflows/build-fullstack.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - '.github/workflows/build-fullstack.yml'
+permissions:
+  contents: read
+jobs:
+  angular:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Angular dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Compile Angular for production
+        working-directory: frontend
+        run: npm run build
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore backend/Nebula.Api/Nebula.Api.csproj
+      - name: Compile API
+        run: dotnet build backend/Nebula.Api/Nebula.Api.csproj --no-restore --configuration Release

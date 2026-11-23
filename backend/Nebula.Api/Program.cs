@@ -63,6 +63,16 @@ app.MapGet("/api/anime/{slug}/episodes", async (CatalogDb db, string slug) => {
         .OrderBy(e => e.Number).Select(e => new { e.Id, e.Number, e.Title, e.VideoUrl, e.IsPublished }).ToListAsync();
     return Results.Ok(episodes);
 });
+app.MapGet("/api/anime/{slug}/episodes/{number:int}/sources", async (CatalogDb db, string slug, int number) => {
+    var episode = await db.Episodes.AsNoTracking().FirstOrDefaultAsync(e => e.Anime.Slug == slug && e.Number == number && e.IsPublished);
+    if (episode is null) return Results.NotFound();
+    var sources = await db.VideoSources.AsNoTracking()
+        .Where(s => s.EpisodeId == episode.Id && s.Enabled && s.DistributionAuthorized)
+        .OrderBy(s => s.Id)
+        .Select(s => new { s.Id, s.Provider, s.Kind, s.Url, s.Quality })
+        .ToListAsync();
+    return Results.Ok(sources);
+});
 app.MapGet("/api/ads", async (CatalogDb db) => Results.Ok(await db.Ads.AsNoTracking()
     .Select(a => new { a.Id, a.Code, a.Enabled, a.Label, a.Network }).ToListAsync()));
 
@@ -107,6 +117,25 @@ admin.MapDelete("/episodes/{id:int}", async (CatalogDb db, int id) => {
     var e=await db.Episodes.FindAsync(id); if(e is null) return Results.NotFound();
     db.Episodes.Remove(e); await db.SaveChangesAsync(); return Results.NoContent();
 });
+admin.MapPost("/episodes/{id:int}/sources", async (CatalogDb db, int id, VideoSourceInput input) => {
+    if (!ValidSource(input)) return Results.BadRequest(new { error = "Fuente inválida o no autorizada. Revisa el host HTTPS permitido y la licencia." });
+    if (!await db.Episodes.AnyAsync(e => e.Id == id)) return Results.NotFound();
+    var source = new VideoSource {
+        EpisodeId = id, Provider = input.Provider.Trim(), Kind = input.Kind,
+        Url = input.Url, Quality = input.Quality.Trim(),
+        DistributionAuthorized = true, Enabled = true
+    };
+    db.VideoSources.Add(source);
+    await db.SaveChangesAsync();
+    return Results.Created($"/api/admin/sources/{source.Id}", new { source.Id });
+});
+admin.MapDelete("/sources/{id:int}", async (CatalogDb db, int id) => {
+    var source = await db.VideoSources.FindAsync(id);
+    if (source is null) return Results.NotFound();
+    db.VideoSources.Remove(source);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
 admin.MapPut("/ads/{code}", async (CatalogDb db, string code, AdInput input) => {
     if (code != input.Code || code.Length > 40 || !System.Text.RegularExpressions.Regex.IsMatch(code, @"^[a-z0-9_-]+$") ||
         input.Label.Length is < 1 or > 80 || input.Network.Length > 50) return Results.BadRequest();
@@ -116,6 +145,16 @@ admin.MapPut("/ads/{code}", async (CatalogDb db, string code, AdInput input) => 
     await db.SaveChangesAsync();return Results.NoContent();
 });
 
+bool ValidSource(VideoSourceInput source) {
+    if (!source.DistributionAuthorized || source.Provider is null || source.Quality is null ||
+        source.Provider.Length is < 2 or > 50 || source.Quality.Length is < 1 or > 20 ||
+        source.Kind is not ("embed" or "direct")) return false;
+    if (!Uri.TryCreate(source.Url, UriKind.Absolute, out var uri) ||
+        uri.Scheme != Uri.UriSchemeHttps || uri.UserInfo.Length > 0) return false;
+    var allowed = (Environment.GetEnvironmentVariable("NEBULA_VIDEO_HOSTS") ?? "")
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    return allowed.Any(host => uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase));
+}
 static bool ValidAnime(AnimeInput a) =>
     a.Slug.Length is >= 3 and <= 100 && System.Text.RegularExpressions.Regex.IsMatch(a.Slug, @"^[a-z0-9]+(?:-[a-z0-9]+)*$") &&
     a.Title.Length is >= 2 and <= 180 && a.Description.Length is >= 10 and <= 4000 &&
@@ -127,6 +166,23 @@ static bool ValidEpisode(EpisodeInput e) => e.Number is >= 1 and <= 5000 && e.Ti
 using (var scope = app.Services.CreateScope()) {
     var db = scope.ServiceProvider.GetRequiredService<CatalogDb>();
     await db.Database.EnsureCreatedAsync(); // MVP only; migrate to EF migrations before production.
+    // Preserve existing SQLite databases created by the previous MVP schema.
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS "VideoSources" (
+            "Id" INTEGER NOT NULL CONSTRAINT "PK_VideoSources" PRIMARY KEY AUTOINCREMENT,
+            "EpisodeId" INTEGER NOT NULL,
+            "Provider" TEXT NOT NULL,
+            "Kind" TEXT NOT NULL,
+            "Url" TEXT NOT NULL,
+            "Quality" TEXT NOT NULL,
+            "Enabled" INTEGER NOT NULL,
+            "DistributionAuthorized" INTEGER NOT NULL,
+            CONSTRAINT "FK_VideoSources_Episodes_EpisodeId" FOREIGN KEY ("EpisodeId")
+                REFERENCES "Episodes" ("Id") ON DELETE CASCADE
+        );
+        """);
+    await db.Database.ExecuteSqlRawAsync(
+        """CREATE INDEX IF NOT EXISTS "IX_VideoSources_EpisodeId" ON "VideoSources" ("EpisodeId");""");
     if (!await db.Animes.AnyAsync()) {
         db.Animes.AddRange(
             new Anime {Slug="astral-odyssey",Title="Astral Odyssey",Description="Un grupo de viajeros descubre un universo oculto entre constelaciones.",Genre="Fantasía",Year=2026, Episodes=[new Episode {Number=1,Title="Primer encuentro",IsPublished=true}]},

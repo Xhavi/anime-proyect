@@ -20,7 +20,20 @@ public sealed class Episode {
     public string Title { get; set; } = "";
     public string? VideoUrl { get; set; }
     public bool IsPublished { get; set; }
+    public List<VideoSource> Sources { get; set; } = [];
 }
+public sealed class VideoSource {
+    public int Id { get; set; }
+    public int EpisodeId { get; set; }
+    public Episode Episode { get; set; } = null!;
+    public string Provider { get; set; } = "";
+    public string Kind { get; set; } = "embed";
+    public string Url { get; set; } = "";
+    public string Quality { get; set; } = "HD";
+    public bool Enabled { get; set; } = true;
+    public bool DistributionAuthorized { get; set; }
+}
+public record VideoSourceInput(string Provider, string Kind, string Url, string Quality, bool DistributionAuthorized);
 public sealed class AdPlacement {
     public int Id { get; set; }
     public string Code { get; set; } = "";
@@ -32,10 +45,12 @@ public sealed class CatalogDb(DbContextOptions<CatalogDb> options) : DbContext(o
     public DbSet<Anime> Animes => Set<Anime>();
     public DbSet<Episode> Episodes => Set<Episode>();
     public DbSet<AdPlacement> Ads => Set<AdPlacement>();
+    public DbSet<VideoSource> VideoSources => Set<VideoSource>();
     protected override void OnModelCreating(ModelBuilder model) {
         model.Entity<Anime>().HasIndex(a => a.Slug).IsUnique();
         model.Entity<Episode>().HasIndex(e => new { e.AnimeId, e.Number }).IsUnique();
         model.Entity<Episode>().HasOne(e => e.Anime).WithMany(a => a.Episodes).HasForeignKey(e => e.AnimeId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<VideoSource>().HasOne(s => s.Episode).WithMany(e => e.Sources).HasForeignKey(s => s.EpisodeId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<AdPlacement>().HasIndex(a => a.Code).IsUnique();
     }
 }
